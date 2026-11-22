@@ -73,6 +73,37 @@ npm run dev
 | 用量计费 | `cost_account` | 用量账单 | 账单编号、提供方、计费周期 |
 | 任务调度 | `task_schedule` | 调度计划 | 计划编号、关联端点、Cron表达式 |
 
+### 投递发布清单（分段回执归并）
+
+数据投递结束只生成版本记录，是否真正交付要以分段接收回执为准。
+`delivery_manifest` 领域把分段投递采集回来的回执归并成**投递发布清单**，
+关联实际签收的数据段与待消费数据版本，独立于通用资源路由，接口前缀
+`/api/delivery-manifest`：
+
+| 接口 | 作用 |
+| --- | --- |
+| `POST /waves` | 投递结束建立波次、发布清单，并按分段预登记待消费数据版本（初始均为「待回执」，不预设已交付） |
+| `POST /receipts` | 采集分段回执（已签收/接收失败/超时），同一分段重复成功签收只认第一次，判为重复回执且清单不变 |
+| `GET /waves/{wave_no}/manifest` | 查发布清单与各分段版本、申报/实际行数、回执与消费状态 |
+| `GET /waves/{wave_no}/consumable` | 查当前实际可消费分段（必须已签收，带确切版本和行数） |
+| `GET /waves/{wave_no}/segments/{segment}/receipt` | 按段查回执、首次有效签收与实际行数 |
+| `GET /waves/{wave_no}/receipts` | 查波次全部回执 |
+| `POST /consumption` | 订阅确认：只登记可消费分段；失败/超时/待回执分段拦截，已消费分段不重算 |
+| `GET /consumption` | 按订阅方/波次查分段实际消费登记 |
+
+规则要点：
+
+- 清单状态沿实际回执流转：`交付中 → 可消费 → 已确认`。任一分段接收失败、
+  超时或尚未回执，清单都停留在「交付中」，该分段不会被写成已交付。
+- 每个可消费分段带确切的数据版本编号和实际签收行数，回执结果同步回
+  `data_version`（含波次编号、分段编号、回执状态、实际行数），可按段查询。
+- 订阅管理（`subscriber`）的「确认消费」动作会自动联动同主题在途波次，
+  按可消费版本分段登记实际消费；失败后重试不会重算已经消费的分段，
+  首次消费记录保持不变。
+- 后端逻辑在 `backend/app/services/delivery_manifest.py`，前端领域封装在
+  `frontend/src/domain/delivery_manifest.ts`，端到端验证脚本在
+  `backend/scripts/verify_delivery_manifest.py`。
+
 ## 约定
 
 - 全部模块共享`frontend/src/views/WorkbenchView.vue|tsx`和一套资源路由。

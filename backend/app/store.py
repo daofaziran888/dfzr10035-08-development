@@ -14,6 +14,14 @@ class Store:
         self._tables: dict[str, list[dict[str, Any]]] = {
             name: [dict(row) for row in rows] for name, rows in SEED_ROWS.items()
         }
+        # 投递发布清单领域的运行时表：波次、清单、分段回执、分段消费登记。
+        for name in (
+            "delivery_wave",
+            "delivery_manifest",
+            "delivery_receipt",
+            "subscriber_consumption",
+        ):
+            self._tables.setdefault(name, [])
 
     def module_names(self) -> list[str]:
         return sorted(self._tables)

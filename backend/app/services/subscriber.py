@@ -25,8 +25,15 @@ class SubscriberService(BaseModuleService):
             self._create_data_version(entry)
             message += "，已创建Webhook路由规则和数据版本"
         elif action == "确认消费":
+            linked = self._confirm_manifest_consumption(entry)
             self._log_consume_event(entry)
-            message += "，已记录消费日志"
+            if linked is not None:
+                message += (
+                    f"，已按发布清单登记实际消费（新消费{linked['new']}段、"
+                    f"未开放{linked['blocked']}段、已消费不重算{linked['skipped']}段）"
+                )
+            else:
+                message += "，已记录消费日志"
         elif action == "停订服务":
             self._cleanup_cache_refs(entry)
             message += "，已清理关联缓存引用"
@@ -65,6 +72,34 @@ class SubscriberService(BaseModuleService):
             "创建时间": "2026-11-17",
             "status": "创建中", "pending": True, "abnormal": False,
         })
+
+    def _confirm_manifest_consumption(self, sub: dict) -> dict | None:
+        """确认消费联动投递发布清单：按可消费版本分段登记实际消费。
+
+        只处理该订阅主题下尚未最终确认的波次；没有关联波次时返回 None，
+        保留原有消费日志行为。失败/超时/待回执分段不会被登记。
+        """
+        from app.services.delivery_manifest import manifest_service
+
+        topic = sub.get("数据主题", "")
+        waves = [
+            w for w in store.rows("delivery_wave")
+            if w.get("数据主题") == topic and w.get("status") != "已确认"
+        ]
+        if not waves:
+            return None
+        # 一个主题同时只归并最新一个在途波次
+        wave = max(waves, key=lambda w: int(w.get("id", 0)))
+        result = manifest_service.confirm_consumption(
+            wave_no=wave["波次编号"], subscriber_id=int(sub["id"]),
+        )
+        sub["消费状态"] = "消费确认" if not result["not_available"] else "部分消费"
+        return {
+            "new": len(result["newly_consumed"]),
+            "blocked": len(result["not_available"]),
+            "skipped": len(result["already_consumed"]),
+            "manifest_status": result["manifest_status"],
+        }
 
     def _log_consume_event(self, sub: dict):
         """消费确认时写调用日志。"""
